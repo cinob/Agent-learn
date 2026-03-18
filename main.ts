@@ -1,4 +1,5 @@
 import fs from 'fs'
+import path from 'path'
 
 type Message = {
   role: string
@@ -22,20 +23,84 @@ type ApiResponse = {
   }>
 }
 
-const ModelId = 'Pro/zai-org/GLM-5'
-const System = `你是一个位于 ${process.cwd()} 的编程助手。使用 bash 解决任务。执行，不要解释。`
-const Tools = [{
-  type: "function",
-  function: {
-    name: "bash",
-    description: "Run a shell command.",
-    parameters: {
-      type: "object",
-      properties: { command: { type: "string" } },
-      required: ["command"]
+const WORKDIR = process.cwd()
+const MODEL = 'Pro/zai-org/GLM-5'
+const SYSTEM = `你是一个位于 ${WORKDIR} 的编程助手。使用 bash 解决任务。执行，不要解释。`
+
+function safePath(p: string): string {
+  const resolved = path.resolve(WORKDIR, p)
+  if (!resolved.startsWith(WORKDIR + path.sep) && resolved !== WORKDIR)
+    throw new Error(`Path escapes workspace: ${p}`)
+  return resolved
+}
+
+const TOOL_HANDLERS: Record<string, (args: any) => string> = {
+  bash: (args) => runBash(args.command),
+  read_file: (args) => readFile(args.path, args.limit),
+  write_file: (args) => writeFile(args.path, args.content),
+  edit_file: (args) => editFile(args.path, args.old_text, args.new_text)
+}
+
+const TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "bash",
+      description: "Run a shell command.",
+      parameters: {
+        type: "object",
+        properties: { command: { type: "string" } },
+        required: ["command"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_file",
+      description: "Read file contents.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          limit: { type: "integer" }
+        },
+        required: ["path"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "write_file",
+      description: "Write content to file.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          content: { type: "string" }
+        },
+        required: ["path", "content"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "edit_file",
+      description: "Replace exact text in file.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          old_text: { type: "string" },
+          new_text: { type: "string" }
+        },
+        required: ["path", "old_text", "new_text"]
+      }
     }
   }
-}]
+]
 
 function runBash(command: string): string {
   const dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
@@ -45,7 +110,7 @@ function runBash(command: string): string {
   try {
     const result = Bun.spawnSync({
       cmd: ['bash', '-c', command],
-      cwd: process.cwd(),
+      cwd: WORKDIR,
       stdout: 'pipe',
       stderr: 'pipe',
       timeout: 120000
@@ -55,6 +120,43 @@ function runBash(command: string): string {
     return out ? out.slice(0, 50000) : "(no output)"
   } catch (error) {
     return "Error: Timeout (120s)"
+  }
+}
+
+function readFile(filePath: string, limit?: number): string {
+  try {
+    const text = fs.readFileSync(safePath(filePath), 'utf-8')
+    const lines = text.split('\n')
+    if (limit && limit < lines.length) {
+      return lines.slice(0, limit).join('\n') + `\n... (${lines.length - limit} more lines)`
+    }
+    return text.slice(0, 50000)
+  } catch (e: any) {
+    return `Error: ${e.message}`
+  }
+}
+
+function writeFile(filePath: string, content: string): string {
+  try {
+    const fp = safePath(filePath)
+    fs.mkdirSync(path.dirname(fp), { recursive: true })
+    fs.writeFileSync(fp, content)
+    return `Wrote ${content.length} bytes to ${filePath}`
+  } catch (e: any) {
+    return `Error: ${e.message}`
+  }
+}
+
+function editFile(filePath: string, oldText: string, newText: string): string {
+  try {
+    const fp = safePath(filePath)
+    const content = fs.readFileSync(fp, 'utf-8')
+    if (!content.includes(oldText))
+      return `Error: Text not found in ${filePath}`
+    fs.writeFileSync(fp, content.replace(oldText, newText))
+    return `Edited ${filePath}`
+  } catch (e: any) {
+    return `Error: ${e.message}`
   }
 }
 
@@ -70,9 +172,9 @@ async function agentLoop(messages: Message[]) {
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: ModelId,
+        model: MODEL,
         messages,
-        tools: Tools,
+        tools: TOOLS,
         max_tokens: 8000
       })
     })
@@ -90,9 +192,9 @@ async function agentLoop(messages: Message[]) {
     let toolOutput = ''
     for (const toolCall of choice.message.tool_calls) {
       const args = JSON.parse(toolCall.function.arguments)
-      console.log(`\x1b[33m$ ${args.command}\x1b[0m`)
-      const output = runBash(args.command)
-      console.log(output.slice(0, 200))
+      const handler = TOOL_HANDLERS[toolCall.function.name]
+      const output = handler ? handler(args) : `Unknown tool: ${toolCall.function.name}`
+      console.log(`> ${toolCall.function.name}: ${output.slice(0, 200)}`)
       toolOutput += `[Tool ${toolCall.function.name}]: ${output}\n\n`
     }
     
@@ -101,7 +203,7 @@ async function agentLoop(messages: Message[]) {
 }
 
 async function run() {
-  const history: Message[] = [{ role: 'system', content: System }]
+  const history: Message[] = [{ role: 'system', content: SYSTEM }]
   
   while (true) {
     process.stdout.write('\x1b[36mcinob AI agent >> \x1b[0m')
