@@ -283,7 +283,6 @@ async function agentLoop(messages: Message[]) {
     if (roundsSinceTodo >= 3)
       toolOutput = `<reminder>Update your todos.</reminder>\n\n${toolOutput}`
 
-    console.log('tool output:', toolOutput.trim())
     messages.push({ role: 'user', content: toolOutput.trim() })
   }
 }
