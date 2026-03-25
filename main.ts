@@ -27,7 +27,64 @@ interface ApiResponse {
 
 const WORKDIR = process.cwd()
 const MODEL = 'Pro/zai-org/GLM-5'
-const SYSTEM = `你是一个位于 ${WORKDIR} 的编程助手。使用 bash 解决任务。执行，不要解释。`
+const SYSTEM = `你是一个位于 ${WORKDIR} 的代码智能体。
+使用 todo 工具来规划多步骤任务。开始前标记为 in_progress，完成后标记为 completed。
+优先使用工具而非文字描述。`
+
+interface TodoItem {
+  id: string
+  text: string
+  status: 'pending' | 'in_progress' | 'completed'
+}
+
+class TodoManager {
+  private items: TodoItem[] = []
+
+  update(items: Array<{ text?: unknown, status?: unknown, id?: unknown }>): string {
+    if (items.length > 20) {
+      throw new Error('Max 20 todos allowed')
+    }
+    const validated: TodoItem[] = []
+    let inProgressCount = 0
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      const text = String(item.text ?? '').trim()
+      const status = String(item.status ?? 'pending').toLowerCase() as TodoItem['status']
+      const itemId = String(item.id ?? String(i + 1))
+      if (!text) {
+        throw new Error(`Item ${itemId}: text required`)
+      }
+      if (!['pending', 'in_progress', 'completed'].includes(status)) {
+        throw new Error(`Item ${itemId}: invalid status '${status}'`)
+      }
+      if (status === 'in_progress') {
+        inProgressCount++
+      }
+      validated.push({ id: itemId, text, status })
+    }
+    if (inProgressCount > 1) {
+      throw new Error('Only one task can be in_progress at a time')
+    }
+    this.items = validated
+    return this.render()
+  }
+
+  render(): string {
+    if (!this.items.length) {
+      return 'No todos.'
+    }
+    const lines: string[] = []
+    for (const item of this.items) {
+      const marker = { pending: '[ ]', in_progress: '[>]', completed: '[x]' }[item.status]
+      lines.push(`${marker} #${item.id}: ${item.text}`)
+    }
+    const done = this.items.filter(t => t.status === 'completed').length
+    lines.push(`\n(${done}/${this.items.length} completed)`)
+    return lines.join('\n')
+  }
+}
+
+const TODO = new TodoManager()
 
 function safePath(p: string): string {
   const resolved = path.resolve(WORKDIR, p)
@@ -41,6 +98,7 @@ const TOOL_HANDLERS: Record<string, (args: any) => string> = {
   read_file: args => readFile(args.path, args.limit),
   write_file: args => writeFile(args.path, args.content),
   edit_file: args => editFile(args.path, args.old_text, args.new_text),
+  todo: args => TODO.update(args.items),
 }
 
 const TOOLS = [
@@ -100,6 +158,18 @@ const TOOLS = [
         },
         required: ['path', 'old_text', 'new_text'],
       },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'todo',
+      description: 'Update task list. Track progress on multi-step tasks.',
+      parameters: {
+        type: 'object',
+        items: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, text: { type: 'string' }, status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] } }, required: ['id', 'text', 'status'] } },
+      },
+      required: ['items'],
     },
   },
 ]
@@ -171,6 +241,8 @@ async function agentLoop(messages: Message[]) {
   if (!apiKey)
     throw new Error('SILICONFLOW_API_KEY not found')
 
+  let roundsSinceTodo = 0
+
   while (true) {
     const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
       method: 'POST',
@@ -197,14 +269,21 @@ async function agentLoop(messages: Message[]) {
     }
 
     let toolOutput = ''
+    let usedTodo = false
     for (const toolCall of choice.message.tool_calls) {
       const args = JSON.parse(toolCall.function.arguments)
       const handler = TOOL_HANDLERS[toolCall.function.name]
       const output = handler ? handler(args) : `Unknown tool: ${toolCall.function.name}`
       console.log(`> ${toolCall.function.name}: ${output.slice(0, 200)}`)
       toolOutput += `[Tool ${toolCall.function.name}]: ${output}\n\n`
+      if (toolCall.function.name === 'todo')
+        usedTodo = true
     }
+    roundsSinceTodo = usedTodo ? 0 : roundsSinceTodo + 1
+    if (roundsSinceTodo >= 3)
+      toolOutput = `<reminder>Update your todos.</reminder>\n\n${toolOutput}`
 
+    console.log('tool output:', toolOutput.trim())
     messages.push({ role: 'user', content: toolOutput.trim() })
   }
 }
