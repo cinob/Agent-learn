@@ -2,6 +2,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
+import { startCli } from './cli'
 
 interface Message {
   role: string
@@ -290,16 +291,7 @@ async function agentLoop(messages: Message[]) {
 async function run() {
   const history: Message[] = [{ role: 'system', content: SYSTEM }]
 
-  while (true) {
-    process.stdout.write('\x1B[36mcinob AI agent >> \x1B[0m')
-
-    const query = await new Promise<string>((resolve) => {
-      process.stdin.once('data', data => resolve(data.toString().trim()))
-    })
-
-    if (!query || ['q', 'exit'].includes(query.toLowerCase()))
-      break
-
+  const handleQuery = async (query: string) => {
     history.push({ role: 'user', content: query })
     await agentLoop(history)
 
@@ -310,9 +302,11 @@ async function run() {
     console.log()
   }
 
-  fs.writeFileSync('output.json', JSON.stringify(history, null, 2))
+  const onExit = () => {
+    fs.writeFileSync('output.json', JSON.stringify(history, null, 2))
+  }
 
-  process.exit(0)
+  startCli(handleQuery, onExit)
 }
 
 run().catch(error => console.error('Error:', error))
