@@ -27,8 +27,9 @@ interface ApiResponse {
 }
 
 const WORKDIR = process.cwd()
-const MODEL = 'Pro/zai-org/GLM-5'
-const SYSTEM = `你是一个位于 ${WORKDIR} 的代码智能体。
+const API_URL = process.env.SILICONFLOW_API_URL || 'https://api.siliconflow.cn/v1/chat/completions'
+const MODEL = process.env.SILICONFLOW_MODEL || 'Pro/zai-org/GLM-5'
+const SYSTEM = process.env.SILICONFLOW_SYSTEM_PROMPT || `你是一个位于 ${WORKDIR} 的代码智能体。
 使用 todo 工具来规划多步骤任务。开始前标记为 in_progress，完成后标记为 completed。
 优先使用工具而非文字描述。`
 
@@ -245,7 +246,7 @@ async function agentLoop(messages: Message[]) {
   let roundsSinceTodo = 0
 
   while (true) {
-    const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
+    const response = await fetch(API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -297,9 +298,9 @@ async function run() {
 
     const lastMessage = history.at(-1)!
     if (lastMessage.role === 'assistant') {
-      console.log(lastMessage.content)
+      return lastMessage.content
     }
-    console.log()
+    return ''
   }
 
   const onExit = () => {

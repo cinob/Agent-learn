@@ -1,7 +1,7 @@
 import process from 'node:process'
 import readline from 'node:readline'
 
-export type HandleQuery = (query: string) => Promise<void>
+export type HandleQuery = (query: string) => Promise<string | void>
 
 export function startCli(handleQuery: HandleQuery, onExit?: () => void) {
   const rl = readline.createInterface({
@@ -15,7 +15,12 @@ export function startCli(handleQuery: HandleQuery, onExit?: () => void) {
   rl.on('line', async (line) => {
     const query = line.trim()
 
-    if (!query || ['q', 'exit'].includes(query.toLowerCase())) {
+    if (!query) {
+      rl.prompt()
+      return
+    }
+
+    if (['q', 'exit'].includes(query.toLowerCase())) {
       rl.close()
       return
     }
@@ -38,15 +43,24 @@ export function startCli(handleQuery: HandleQuery, onExit?: () => void) {
     }, 300)
 
     try {
-      await handleQuery(query)
+      const reply = await handleQuery(query)
+      // 先清掉“正在思考...”这一行，并换到下一行
+      clearInterval(thinkingInterval)
+      process.stdout.write('\r\x1B[K\n')
+      process.stdout.write('\x1B[?25h') // 恢复光标
+
+      if (reply && reply.length) {
+        process.stdout.write(reply)
+        process.stdout.write('\n')
+      }
     }
     catch (error) {
+      clearInterval(thinkingInterval)
+      process.stdout.write('\r\x1B[K\n')
+      process.stdout.write('\x1B[?25h')
       console.error('处理请求时出错:', error)
     }
     finally {
-      clearInterval(thinkingInterval)
-      process.stdout.write('\r\x1B[K') // 清掉“正在思考...”这一行
-      process.stdout.write('\x1B[?25h') // 恢复光标
       busy = false
       rl.prompt()
     }
