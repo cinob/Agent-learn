@@ -7,7 +7,7 @@ export function startCli(handleQuery: HandleQuery, onExit?: () => void) {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: '\x1B[36mcinob AI agent >> \x1B[0m',
+    prompt: '\x1B[36mcinob AI Agent >> \x1B[0m',
   })
 
   let busy = false

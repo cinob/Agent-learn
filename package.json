@@ -1,8 +1,17 @@
 {
   "name": "ts-start-template",
   "version": "1.0.0",
+  "private": true,
+  "packageManager": "bun@1.2.21",
+  "description": "",
   "author": "cinob <cinob@foxmail.com> (https://github.com/cinob/)",
+  "license": "MIT",
   "main": "main.ts",
+  "scripts": {
+    "start": "bun main.ts",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
   "devDependencies": {
     "@antfu/eslint-config": "^7.7.3",
     "@types/bun": "^1.3.10",
@@ -10,14 +19,5 @@
     "eslint": "^10.0.3",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
-  },
-  "description": "",
-  "license": "MIT",
-  "packageManager": "bun@1.2.21",
-  "private": true,
-  "scripts": {
-    "start": "bun main.ts",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
   }
 }
